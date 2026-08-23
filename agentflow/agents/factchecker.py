@@ -18,7 +18,6 @@ class FactChecker(Agent):
         # Prefer the Writer's report, fall back to the Researcher's findings.
         for key in ("Writer", "Researcher"):
             text = ctx.get("stage_outputs", {}).get(key, "")
-            bullets = [l for l in text.splitlines() if l.strip().startswith("-") and "[S" not in l.split()[0]]
             # Keep only lines that look like findings (contain a [S#] tag).
             found = [l for l in text.splitlines() if "[S" in l and l.strip().startswith("-")]
             if found:

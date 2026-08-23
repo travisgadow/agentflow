@@ -6,14 +6,29 @@ Runs a sequence of agents, threading a shared Context, and applies:
 * a **governor** for budgets + a final publish gate,
 * a full **trace** of every decision.
 
+Run modes
+---------
+``strict`` (default)
+    If a stage's verification fails, the pipeline stops immediately and the
+    run is not publishable. Any warnings also block publish.
+
+``lenient`` (``strict=False``)
+    Verification failures and agent errors are recorded as warnings in the
+    audit trail but do not stop the pipeline or block publish on their own —
+    publishing is then decided purely by your Governor policies.
+
+``stop_on_failure``
+    When an agent returns ``ok=False`` (e.g. LLM error), abort the pipeline
+    instead of skipping that stage. Default False (skip and continue).
+
 The result exposes the final output, whether it was deemed publishable, any
-warnings, the governance decision, and the trace.
+warnings, the governance decision, and the per-run trace.
 """
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from .agent import Agent
+from .agent import Agent, AgentResult
 from .context import Context
 from .governor import Governor
 from .trace import Trace
@@ -27,34 +42,50 @@ class Pipeline:
         governor: Optional[Governor] = None,
         default_checks: Optional[List] = None,
         trace: Optional[Trace] = None,
+        strict: bool = True,
+        stop_on_failure: bool = False,
     ) -> None:
         self.agents = agents
         self.governor = governor or Governor()
         self._default_checks = list(default_checks or [])
         self.trace = trace or Trace()
+        self.strict = strict
+        self.stop_on_failure = stop_on_failure
 
     def run(self, task: str) -> Dict[str, Any]:
+        # Each run gets a clean budget/audit slate and a scoped trace slice,
+        # so a single Pipeline instance can be re-used across many runs.
+        self.governor.reset()
+        run_start = len(self.trace.events)
+
         ctx = Context({"task": task, "stage_outputs": {}, "warnings": []})
-        self.trace.log(event="pipeline_start", task=task)
+        self.trace.log(event="pipeline_start", task=task, strict=self.strict, stop_on_failure=self.stop_on_failure)
 
         current = task
         final_output: Optional[str] = None
-        aborted = None
+        aborted: Optional[str] = None
 
         for agent in self.agents:
-            if not self.governor.begin_call():
+            if not self.governor.begin_call(agent.name):
                 aborted = "budget_exhausted"
-                ctx["warnings"].append(f"pipeline aborted: {aborted} before {agent.name}")
+                ctx["warnings"].append(f"pipeline aborted: {aborted} before stage '{agent.name}'")
                 self.trace.log(event="blocked", agent=agent.name, reason=aborted)
                 break
 
             self.trace.log(event="agent_start", agent=agent.name)
-            result = agent.act(current, ctx)
+            try:
+                result = agent.act(current, ctx)
+            except Exception as exc:  # noqa: BLE001 - no agent may crash the run
+                result = AgentResult(agent=agent.name, output="", ok=False, error=f"agent raised: {exc}")
             self.governor.note_tokens(result.tokens or max(0, len(result.output)))
 
             if not result.ok:
                 ctx["warnings"].append(f"{agent.name}: {result.error}")
-                self.trace.log(event="agent_error", agent=agent.name, error=result.error)
+                self.trace.log(event="agent_error", agent=agent.name, error=result.error, attempts=result.attempts)
+                if self.stop_on_failure:
+                    aborted = f"agent_failed:{agent.name}"
+                    self.trace.log(event="blocked", agent=agent.name, reason=aborted)
+                    break
                 continue
 
             ctx["stage_outputs"][agent.name] = result.output
@@ -67,21 +98,36 @@ class Pipeline:
             ctx["stage_outputs"][f"{agent.name}_verdict"] = verdict.to_dict()
             if not verdict.verified:
                 failing = [c for c in verdict.checks if not c["passed"]]
-                ctx["warnings"].append(f"{agent.name}: {failing}")
-            self.trace.log(
-                event="agent_done",
-                agent=agent.name,
-                verified=verdict.verified,
-                checks=verdict.checks,
-            )
+                ctx["warnings"].append(f"{agent.name}: verification failed: {failing}")
+                self.trace.log(
+                    event="agent_done",
+                    agent=agent.name,
+                    verified=False,
+                    checks=verdict.checks,
+                )
+                if self.strict:
+                    aborted = f"verification_failed:{agent.name}"
+                    self.trace.log(event="blocked", agent=agent.name, reason=aborted)
+                    break
+            else:
+                self.trace.log(
+                    event="agent_done",
+                    agent=agent.name,
+                    verified=True,
+                    checks=verdict.checks,
+                )
 
         # Final governance gate (publish veto).
         decision = self.governor.evaluate("publish", ctx)
         self.trace.log(event="governor", action=decision.action, allow=decision.allow, reason=decision.reason)
 
-        publishable = decision.allow and not ctx["warnings"] and aborted is None
-        self.trace.log(event="pipeline_end", publishable=publishable)
+        # In strict mode any warning blocks publish; in lenient mode the
+        # decision is left entirely to the Governor's policies.
+        warnings_block = self.strict and bool(ctx["warnings"])
+        publishable = decision.allow and not warnings_block and aborted is None
+        self.trace.log(event="pipeline_end", publishable=publishable, aborted=aborted)
 
+        run_trace = self.trace.report()[run_start:]
         return {
             "output": final_output,
             "publishable": bool(publishable),
@@ -90,6 +136,6 @@ class Pipeline:
             "stage_outputs": ctx["stage_outputs"],
             "decision": decision.to_dict(),
             "budget": self.governor.budget(),
-            "trace": self.trace.report(),
-            "trace_summary": self.trace.summary(),
+            "trace": run_trace,
+            "trace_summary": Trace.summary_of(run_trace),
         }

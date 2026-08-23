@@ -28,7 +28,12 @@ class Trace:
         return list(self.events)
 
     def summary(self) -> dict:
+        return self.summary_of(self.events)
+
+    @staticmethod
+    def summary_of(events: List[dict]) -> dict:
         by_type: dict[str, int] = {}
-        for e in self.events:
-            by_type[e.get("event", "?")] = by_type.get(e.get("event", "?"), 0) + 1
-        return {"total_events": len(self.events), "by_type": by_type}
+        for e in events:
+            key = e.get("event", "?")
+            by_type[key] = by_type.get(key, 0) + 1
+        return {"total_events": len(events), "by_type": by_type}

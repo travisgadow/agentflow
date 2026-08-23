@@ -17,12 +17,13 @@ class Researcher(Agent):
     def act(self, task: str, ctx: Context) -> AgentResult:
         # Ask the backend for the finding(s). The exact phrasing is backend-dependent;
         # we normalize it into a single, stable bullet with a source tag.
-        body = self.llm.complete(self.system(), f"List 1-3 key findings about: {task}")
+        # Route through call_llm so this stage inherits the agent's retry control.
+        body, attempts = self.call_llm(f"List 1-3 key findings about: {task}")
         body = " ".join(body.split())
         finding = f"{body} [S1]"
         ctx.set("sources", ["S1"])
         output = "## Findings\n- " + finding + "\n"
-        return AgentResult(agent=self.name, output=output, ok=True)
+        return AgentResult(agent=self.name, output=output, ok=True, attempts=attempts)
 
     def checks(self):
         return [has_section("Findings"), all_bullets_sourced()]

@@ -8,7 +8,8 @@ dominating agentic AI in mid-2026 and demonstrates them with a working
 research → draft → fact-check workflow:
 
 1. **Multi-agent orchestration** — a `Pipeline` threads a shared `Context`
-   through a sequence of agents, each building on the previous output.
+   through a sequence of agents, each building on the previous output, with
+   retryable LLM calls and strict/lenient run modes.
 2. **Verifiability-by-design** — every agent can ship its own rubric of checks;
    the pipeline verifies each stage's output against it before moving on.
 3. **A Governor (control-plane)** — a policy + budget layer that can veto a
@@ -62,7 +63,7 @@ is published.
 | `context.py` | `Context` — a shared blackboard threaded through every stage. |
 | `llm.py`     | `LLMBackend` interface + `MockLLM` (offline) + `OpenAICompatible` (any OpenAI-style endpoint, stdlib). |
 | `agent.py`   | `Agent` base + `AgentResult`. Subclass `act()` for custom behavior. |
-| `verifier.py`| `Verifier` + reusable check factories (`has_section`, `min_length`, `all_bullets_sourced`). |
+| `verifier.py`| `Verifier` + reusable check factories (`has_section`, `min_length`, `max_length`, `matches`, `no_match`, `all_bullets_sourced`). |
 | `governor.py`| `Governor` — budgets (`max_agent_calls`, `max_total_tokens`) + `publish` policy gates + audit. |
 | `trace.py`   | `Trace` — append-only event log, in-memory + optional JSONL. |
 | `pipeline.py`| `Pipeline` — runs agents, applies verification + governance, returns a full report. |
@@ -106,6 +107,19 @@ import tests.test_pipeline as t
 for f in [x for x in dir(t) if x.startswith("test_")]:
     getattr(t, f)(); print("PASS", f)
 PY
+```
+
+**Run modes** (strict is the default; see the `--help` for the full list):
+
+```bash
+# lenient: record verification failures as warnings, let the Governor decide
+python examples/research_report.py --lenient "your topic"
+
+# abort immediately if an agent errors (e.g. LLM outage)
+python examples/research_report.py --stop-on-failure "your topic"
+
+# sampling controls for real backends
+python examples/research_report.py --llm openai --temperature 0.7 --max-tokens 512 "your topic"
 ```
 
 ---
@@ -176,6 +190,44 @@ class MyAgent(Agent):
 
 ---
 
+## Run modes & controls
+
+`Pipeline` takes two run-mode flags that shape what happens when a stage goes
+wrong:
+
+```python
+Pipeline(agents, governor=gov, strict=True, stop_on_failure=False)
+```
+
+- **`strict` (default)** — a *verification failure* stops the pipeline and blocks
+  publish. This is the safe default.
+- **`strict=False` (lenient)** — verification failures are recorded as warnings
+  in the audit trail but do *not* stop the pipeline. Publish is then decided
+  solely by your Governor policies (handy for an "operator override" policy).
+- **`stop_on_failure=True`** — abort immediately when an agent errors (e.g. LLM
+  outage). Default is to skip that stage and continue.
+
+LLM calls are **retryable** end-to-end:
+
+```python
+from agentflow import MockLLM, OpenAICompatible
+llm = OpenAICompatible(retries=2, backoff=0.5, temperature=0.7, max_tokens=512)
+```
+
+Transient failures (network, 5xx) are retried with exponential backoff; a 4xx
+(auth, bad request) surfaces immediately as an `LLMError` with the HTTP status
+and detail body. `MockLLM(flaky=N)` raises for the first `N` calls — used by the
+test-suite to exercise the retry path deterministically.
+
+Banned-content gating is a first-class check:
+
+```python
+from agentflow.core.verifier import no_match
+no_match(r"\\$\\d+.*\\b(week|day)s\\b")   # veto hard price+date commitments
+```
+
+---
+
 ## Roadmap (ideas for future agentic-workflow projects)
 
 - **Memory**: a `MemoryStore` that lets agents recall past runs and refine.
@@ -211,6 +263,7 @@ agentflow/
 │   └── research_report.py
 ├── tests/
 │   └── test_pipeline.py
+├── CHANGELOG.md
 ├── LICENSE
 ├── README.md
 ├── pyproject.toml

@@ -23,7 +23,8 @@ class Writer(Agent):
         title = ctx.get("task", "Report")
 
         # Real prose analysis when the backend produces meaningful text.
-        analysis = self.llm.complete(self.system(), f"Summarize these findings:\n{findings}")
+        # Route through call_llm so this stage inherits the agent's retry control.
+        analysis, attempts = self.call_llm(f"Summarize these findings:\n{findings}")
         analysis = " ".join(analysis.split()).strip()
         if not analysis:
             analysis = "See the sourced findings below."
@@ -38,7 +39,7 @@ class Writer(Agent):
             f"## Key Findings\n{finding_lines}\n\n"
             f"## Sources\n{sources_block}\n"
         )
-        return AgentResult(agent=self.name, output=output, ok=True)
+        return AgentResult(agent=self.name, output=output, ok=True, attempts=attempts)
 
     def checks(self):
         return [has_section("Summary"), has_section("Key Findings"), has_section("Sources"), min_length(60)]

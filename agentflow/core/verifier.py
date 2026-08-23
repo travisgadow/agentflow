@@ -9,6 +9,7 @@ is a function ``fn(output, ctx) -> (passed: bool, detail: str)``.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any, Callable, List, Tuple
 
@@ -43,6 +44,35 @@ def min_length(n: int):
     def check(output: str, ctx: Context):
         return len(output) >= n, f"len={len(output)} (need >= {n})"
     return f"min_length:{n}", check
+
+
+def max_length(n: int):
+    """Pass if the output is at most ``n`` characters (useful for tight slots)."""
+    def check(output: str, ctx: Context):
+        return len(output) <= n, f"len={len(output)} (need <= {n})"
+    return f"max_length:{n}", check
+
+
+def matches(pattern: str, flags: int = 0):
+    """Pass if the output matches ``pattern`` (regex, case-insensitive by default)."""
+    rx = re.compile(pattern, flags or re.IGNORECASE)
+    def check(output: str, ctx: Context):
+        m = rx.search(output or "")
+        return bool(m), ("match: " + (m.group(0)[:60] if m else "no match"))
+    return f"matches:{pattern}", check
+
+
+def no_match(pattern: str, flags: int = 0):
+    """Pass if the output does NOT match ``pattern`` (regex, case-insensitive by default).
+
+    Typical use: ``no_match(r"\\$\\d+.*\\b(week|day)s\\b")`` to veto hard price+date
+    commitments in outbound copy.
+    """
+    rx = re.compile(pattern, flags or re.IGNORECASE)
+    def check(output: str, ctx: Context):
+        m = rx.search(output or "")
+        return not m, ("clean" if not m else "banned pattern found: " + (m.group(0)[:60] if m else ""))
+    return f"no_match:{pattern}", check
 
 
 def all_bullets_sourced(tag: str = "[S"):

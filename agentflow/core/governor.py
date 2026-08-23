@@ -49,7 +49,7 @@ class Governor:
         self.audit: List[Decision] = []
 
     # --- budgets -----------------------------------------------------------
-    def begin_call(self) -> bool:
+    def begin_call(self, agent: str | None = None) -> bool:
         """Reserve one agent call. Returns False if the budget is exhausted."""
         if self.max_agent_calls is not None and self._calls >= self.max_agent_calls:
             return False
@@ -68,6 +68,16 @@ class Governor:
             "calls_used": self._calls,
             "tokens_used": self._tokens,
         }
+
+    def reset(self) -> None:
+        """Clear the per-run counters and audit log (budget limits are kept).
+
+        Called by :meth:`Pipeline.run` so a Pipeline/Governor pair can be
+        re-used across many runs without leaking state between them.
+        """
+        self._calls = 0
+        self._tokens = 0
+        self.audit.clear()
 
     # --- policy gates ------------------------------------------------------
     def evaluate(self, action: str, ctx: Context) -> Decision:

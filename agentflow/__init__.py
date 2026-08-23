@@ -9,10 +9,10 @@ dominating agentic AI in mid-2026:
 
 Zero runtime dependencies (Python stdlib only). Swap the LLM backend via env.
 """
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 from .core import (  # noqa: F401
-    Agent, AgentResult, Context, Governor, Decision, LLMBackend,
+    Agent, AgentResult, Context, Governor, Decision, LLMBackend, LLMError,
     MockLLM, OpenAICompatible, make_backend, Pipeline, Trace, Verdict, Verifier,
 )
 from .agents import Researcher, Writer, FactChecker  # noqa: F401
@@ -21,7 +21,7 @@ __all__ = [
     "__version__",
     # core
     "Agent", "AgentResult", "Context", "Governor", "Decision",
-    "LLMBackend", "MockLLM", "OpenAICompatible", "make_backend",
+    "LLMBackend", "LLMError", "MockLLM", "OpenAICompatible", "make_backend",
     "Pipeline", "Trace", "Verdict", "Verifier",
     # example agents
     "Researcher", "Writer", "FactChecker",
