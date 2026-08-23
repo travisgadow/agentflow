@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Tests & demo (${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Show Python version
+        run: python --version
+
+      - name: Byte-compile (import check)
+        run: python -m compileall -q agentflow examples tests
+
+      - name: Run test suite
+        run: |
+          python - <<'PY'
+          import sys, pathlib
+          sys.path.insert(0, str(pathlib.Path(".").resolve()))
+          import tests.test_pipeline as t
+          passed = failed = 0
+          for f in sorted(x for x in dir(t) if x.startswith("test_")):
+              try:
+                  getattr(t, f)()
+                  print("PASS", f)
+                  passed += 1
+              except Exception as exc:
+                  print("FAIL", f, "->", repr(exc))
+                  failed += 1
+          print(f"\n{passed} passed, {failed} failed")
+          if failed:
+              raise SystemExit(1)
+          PY
+
+      - name: Run offline demo
+        run: python examples/research_report.py "agentic AI governance in 2026"

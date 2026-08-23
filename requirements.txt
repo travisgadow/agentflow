@@ -1,0 +1,4 @@
+# Runtime: Python 3.10+ standard library only. No third-party runtime deps.
+#
+# Optional (for tests):
+pytest>=8.0
