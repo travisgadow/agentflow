@@ -23,6 +23,11 @@ Run modes
 
 The result exposes the final output, whether it was deemed publishable, any
 warnings, the governance decision, and the per-run trace.
+
+A ``webhook`` (any object with ``.emit(payload: dict)``) may be supplied; the
+pipeline fires it once on ``pipeline_end`` with a compact run summary. A webhook
+failure is recorded in the result (``result["webhook"]``) and never crashes the
+run.
 """
 from __future__ import annotations
 
@@ -44,6 +49,7 @@ class Pipeline:
         trace: Optional[Trace] = None,
         strict: bool = True,
         stop_on_failure: bool = False,
+        webhook: Optional[Any] = None,
     ) -> None:
         self.agents = agents
         self.governor = governor or Governor()
@@ -51,6 +57,8 @@ class Pipeline:
         self.trace = trace or Trace()
         self.strict = strict
         self.stop_on_failure = stop_on_failure
+        # Any object with `.emit(payload: dict) -> dict`; fired on pipeline_end.
+        self.webhook = webhook
 
     def run(self, task: str) -> Dict[str, Any]:
         # Each run gets a clean budget/audit slate and a scoped trace slice,
@@ -128,7 +136,7 @@ class Pipeline:
         self.trace.log(event="pipeline_end", publishable=publishable, aborted=aborted)
 
         run_trace = self.trace.report()[run_start:]
-        return {
+        result: Dict[str, Any] = {
             "output": final_output,
             "publishable": bool(publishable),
             "aborted": aborted,
@@ -139,3 +147,35 @@ class Pipeline:
             "trace": run_trace,
             "trace_summary": Trace.summary_of(run_trace),
         }
+
+        # Optional webhook: fire once on pipeline_end. A webhook must never
+        # crash the run, so failures are captured in the status, not raised.
+        if self.webhook is not None:
+            payload = {
+                "source": "agentflow",
+                "task": task,
+                "publishable": result["publishable"],
+                "aborted": aborted,
+                "decision": decision.to_dict(),
+                "budget": self.governor.budget(),
+                "warnings": ctx["warnings"],
+                "trace_summary": Trace.summary_of(run_trace),
+            }
+            status: Any = None
+            try:
+                status = self.webhook.emit(payload)
+            except Exception as exc:  # noqa: BLE001
+                status = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+            s = status if isinstance(status, dict) else {"ok": False, "error": str(status)}
+            self.trace.log(
+                event="webhook",
+                ok=bool(s.get("ok")),
+                status=s.get("status"),
+                url=s.get("url"),
+                error=s.get("error"),
+            )
+            result["webhook"] = status
+        else:
+            result["webhook"] = None
+
+        return result

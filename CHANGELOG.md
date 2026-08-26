@@ -2,6 +2,57 @@
 
 All notable changes to `agentflow` are documented here.
 
+## [0.3.0] — 2026-08-25
+
+Three new capabilities, all stdlib-only and offline-testable, drawn from the
+roadmap: **memory**, **parallel fan-out (swarm)**, and **webhooks**.
+
+### Memory
+
+- **New `MemoryStore`** (`agentflow/core/memory.py`) — a small, persistent
+  (JSON-file) memory so agents / your code can `remember` a record and later
+  `recall` it.
+  - `remember(record|str|dict, key=..., **fields)` — append, or upsert when `key` is given.
+  - `recall(query=None, limit=10)` — newest-first; optional substring/token search over a record's `text`/`topic`/`title`/`task` fields (no embeddings, no ML).
+  - `get(key)`, `recent(limit)`, `forget(key)`, `clear()`, `count()`, `len()`.
+  - Thread-safe, human-readable on disk, zero dependencies.
+- `examples/research_report.py` gains `--memory PATH`: recalls a prior run for the topic, then remembers this one.
+
+### Parallel fan-out (swarm)
+
+- **New `FanOut`** (`agentflow/core/fanout.py`) — run a set of agents
+  **concurrently** (stdlib `concurrent.futures`) and merge their outputs into a
+  single stage result. Duck-typed like an `Agent` (`.name`, `.act`, `.checks()`),
+  so a `Pipeline` uses it exactly like any other stage.
+  - `merge(task, ctx, results)` — pluggable combiner; `default_merge` sections each sub-output and notes any that failed.
+  - `max_workers` to cap concurrency (defaults to `min(8, len(agents))`).
+  - Per-sub-agent success/failure is captured in `result.meta` (`succeeded`,
+    `failed`, `errors`, `elapsed`); partial failure is transparent, not silent.
+  - Budget note: a `FanOut` counts as **one** governed stage call.
+- **New `examples/swarm_research.py`** — research a topic across N parallel
+  researchers, merge their sourced findings, then draft + fact-check.
+
+### Webhooks
+
+- **New `WebhookNotifier`** (`agentflow/core/webhook.py`) — a stdlib HTTP
+  POSTer (JSON) with optional retries/backoff. `emit(payload) -> dict` returns a
+  status dict and **never raises** (a webhook must not break a run).
+- **`Pipeline(..., webhook=...)`** — the pipeline fires the webhook once on
+  `pipeline_end` with a compact run summary (`task`, `publishable`, `decision`,
+  `budget`, `warnings`, `trace_summary`). The outcome is exposed as
+  `result["webhook"]` and logged to the `Trace` (`event="webhook"`). A webhook
+  failure is recorded, never raised.
+
+### Packaging / CI
+
+- Exports added to the public API: `MemoryStore`, `FanOut`, `WebhookNotifier`.
+- `examples/research_report.py` gains `--webhook URL` (fires on `pipeline_end`).
+- CI now auto-discovers **all** `tests/test_*.py` modules and runs the new
+  offline demos (`research_report.py` and `swarm_research.py`).
+- Tests: 16 → **25** (memory persistence/recall/upsert; fan-out parallelism +
+  partial/total failure + full pipeline; webhook POST + failure + pipeline
+  integration).
+
 ## [0.2.0] — 2026-08-23
 
 ### Bug fixes

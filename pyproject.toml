@@ -1,12 +1,12 @@
 [project]
 name = "agentflow"
-version = "0.2.0"
+version = "0.3.0"
 description = "A governed, verifiable, multi-agent pipeline toolkit (Python stdlib only)."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [{ name = "travisgadow" }]
-keywords = ["agentic-ai", "multi-agent", "orchestration", "governance", "verification"]
+keywords = ["agentic-ai", "multi-agent", "orchestration", "governance", "verification", "memory", "parallelism"]
 classifiers = [
   "Programming Language :: Python :: 3",
   "License :: OSI Approved :: MIT License",

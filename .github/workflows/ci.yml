@@ -32,22 +32,26 @@ jobs:
       - name: Run test suite
         run: |
           python - <<'PY'
-          import sys, pathlib
-          sys.path.insert(0, str(pathlib.Path(".").resolve()))
-          import tests.test_pipeline as t
+          import sys, pathlib, importlib
+          root = pathlib.Path(".").resolve()
+          sys.path.insert(0, str(root))
           passed = failed = 0
-          for f in sorted(x for x in dir(t) if x.startswith("test_")):
-              try:
-                  getattr(t, f)()
-                  print("PASS", f)
-                  passed += 1
-              except Exception as exc:
-                  print("FAIL", f, "->", repr(exc))
-                  failed += 1
+          for path in sorted((root / "tests").glob("test_*.py")):
+              mod = importlib.import_module(f"tests.{path.stem}")
+              for f in sorted(x for x in dir(mod) if x.startswith("test_")):
+                  try:
+                      getattr(mod, f)()
+                      print("PASS", f)
+                      passed += 1
+                  except Exception as exc:
+                      print("FAIL", path.name, f, "->", repr(exc))
+                      failed += 1
           print(f"\n{passed} passed, {failed} failed")
           if failed:
               raise SystemExit(1)
           PY
 
-      - name: Run offline demo
-        run: python examples/research_report.py "agentic AI governance in 2026"
+      - name: Run offline demos
+        run: |
+          python examples/research_report.py "agentic AI governance in 2026"
+          python examples/swarm_research.py "agentic AI governance in 2026"

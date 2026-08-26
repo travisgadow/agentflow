@@ -14,6 +14,9 @@ research → draft → fact-check workflow:
    the pipeline verifies each stage's output against it before moving on.
 3. **A Governor (control-plane)** — a policy + budget layer that can veto a
    final `publish` action based on the context, and logs an audit trail.
+4. **Memory, parallelism & events (0.3)** — a `MemoryStore` to recall past
+   runs, a `FanOut` "swarm" stage for parallel sub-tasks, and a `WebhookNotifier`
+   that emits the run on `pipeline_end`.
 
 It mirrors the "control plane for autonomous agents" idea that enterprise
 agentic AI is converging on: the layer that decides *what an agent is allowed
@@ -67,6 +70,9 @@ is published.
 | `governor.py`| `Governor` — budgets (`max_agent_calls`, `max_total_tokens`) + `publish` policy gates + audit. |
 | `trace.py`   | `Trace` — append-only event log, in-memory + optional JSONL. |
 | `pipeline.py`| `Pipeline` — runs agents, applies verification + governance, returns a full report. |
+| `memory.py`  | `MemoryStore` — persistent remember/recall memory for agents. |
+| `fanout.py`  | `FanOut` — run a set of agents concurrently and merge (a "swarm" stage). |
+| `webhook.py` | `WebhookNotifier` — POST the run to a webhook (stdlib, never crashes the run). |
 
 ### Example agents (`agentflow/agents`)
 
@@ -102,10 +108,12 @@ AGENTFLOW_MODEL=llama3.1 \
 
 ```bash
 python - <<'PY'
-import sys, pathlib; sys.path.insert(0, str(pathlib.Path(".").resolve()))
-import tests.test_pipeline as t
-for f in [x for x in dir(t) if x.startswith("test_")]:
-    getattr(t, f)(); print("PASS", f)
+import sys, pathlib, importlib
+root = pathlib.Path(".").resolve(); sys.path.insert(0, str(root))
+for path in sorted((root / "tests").glob("test_*.py")):
+    mod = importlib.import_module(f"tests.{path.stem}")
+    for f in [x for x in dir(mod) if x.startswith("test_")]:
+        getattr(mod, f)(); print("PASS", f)
 PY
 ```
 
@@ -174,6 +182,45 @@ class MyAgent(Agent):
         return [has_section("Analysis")]
 ```
 
+**Memory, parallelism & webhooks (0.3):**
+
+```python
+from agentflow import MockLLM, Pipeline, Governor, MemoryStore, FanOut, WebhookNotifier
+
+llm = MockLLM()
+
+# 1) Memory — recall past runs and remember this one.
+mem = MemoryStore("agentflow_memory.json")
+mem.remember("agentic AI governance", topic="agentic AI", publishable=True)
+prior = mem.recall("agentic AI", limit=3)
+
+# 2) Parallel fan-out (swarm) — run independent sub-tasks concurrently, then merge.
+class AngleAgent(Agent):
+    def __init__(self, name, angle):
+        super().__init__(name)
+        self.angle = angle
+    def act(self, task, ctx):
+        out, _ = self.call_llm(f"List findings on {self.angle} of: {task}")
+        return AgentResult(agent=self.name, output=f"- {out} [S1]", ok=True)
+
+fanout = FanOut(
+    "Researcher",
+    agents=[AngleAgent(f"R{i}", a) for i, a in enumerate(["risk", "adoption", "governance"])],
+    max_workers=3,
+)
+
+# 3) Webhook — emit the run on pipeline_end (never crashes the run).
+webhook = WebhookNotifier("https://hooks.example.com/agentflow", retries=1, backoff=0.2)
+
+pipeline = Pipeline(
+    agents=[fanout, Writer(name="Writer", llm=llm), FactChecker(name="FactChecker", llm=llm)],
+    governor=Governor(max_agent_calls=10),
+    webhook=webhook,
+)
+result = pipeline.run("agentic AI governance in 2026")
+print(result["webhook"])          # {"ok": True, "status": 200, ...}
+```
+
 ---
 
 ## Design notes
@@ -226,16 +273,41 @@ from agentflow.core.verifier import no_match
 no_match(r"\\$\\d+.*\\b(week|day)s\\b")   # veto hard price+date commitments
 ```
 
+**Emit the run (0.3):** a `Pipeline` can POST a compact run summary to a webhook
+on `pipeline_end` — a webhook failure is recorded, never raised:
+
+```python
+from agentflow import WebhookNotifier
+pipeline = Pipeline(agents, governor=gov,
+                    webhook=WebhookNotifier("https://hooks.example.com/hook"))
+```
+
+**Parallel sub-tasks (0.3):** wrap independent agents in a `FanOut` "swarm" stage
+to run them concurrently and merge their outputs (a `FanOut` is one governed
+call):
+
+```python
+from agentflow import FanOut
+stage = FanOut("Researcher", agents=[a1, a2, a3], max_workers=3)
+pipeline = Pipeline([stage, Writer(...), FactChecker(...)], governor=gov)
+```
+
 ---
 
 ## Roadmap (ideas for future agentic-workflow projects)
 
-- **Memory**: a `MemoryStore` that lets agents recall past runs and refine.
-- **Parallel stages**: `Pipeline` currently runs agents sequentially; add
-  fan-out (a "swarm" stage) for research.
+**Shipped in 0.3:**
+- ~~**Memory**~~ — a `MemoryStore` that lets agents recall past runs and refine. ✅
+- ~~**Parallel stages**~~ — `FanOut` runs a "swarm" of agents concurrently and merges. ✅
+- ~~**Webhooks**~~ — `WebhookNotifier` emits the run on `pipeline_end`. ✅
+
+**Still open:**
 - **MCP bridge**: an `OpenAICompatible`-like wrapper that speaks MCP over HTTP
   for cross-agent tool use.
-- **Webhooks**: emit the `Trace` to a webhook on `pipeline_end`.
+- **Streaming fan-out**: incremental `merge` as sub-agents complete (back-pressure,
+  early-stop once enough sub-tasks have succeeded).
+- **Token-budgeted fan-out**: count each sub-agent call against the Governor
+  budget independently (a `FanOut` is currently one governed stage call).
 
 ---
 
@@ -256,13 +328,18 @@ agentflow/
 │       ├── context.py
 │       ├── governor.py
 │       ├── llm.py
+│       ├── memory.py
+│       ├── fanout.py
+│       ├── webhook.py
 │       ├── pipeline.py
 │       ├── trace.py
 │       └── verifier.py
 ├── examples/
-│   └── research_report.py
+│   ├── research_report.py
+│   └── swarm_research.py
 ├── tests/
-│   └── test_pipeline.py
+│   ├── test_pipeline.py
+│   └── test_v03.py
 ├── CHANGELOG.md
 ├── LICENSE
 ├── README.md

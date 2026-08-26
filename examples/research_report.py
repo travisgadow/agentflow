@@ -20,6 +20,11 @@ Run modes:
     --stop-on-failure         abort immediately when an agent errors (e.g. LLM outage)
 
 Writes an audit trail to ./agentflow_trace.jsonl next to the CWD.
+
+Memory + webhook (0.3):
+    --memory  ./agentflow_memory.json   recall a prior run for the topic, then
+                                        remember this one (JSON store)
+    --webhook http://127.0.0.1:9000/hook  POST a compact run summary on pipeline_end
 """
 from __future__ import annotations
 
@@ -30,7 +35,9 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from agentflow.core import Governor, Pipeline, Trace, make_backend  # noqa: E402
+from agentflow.core import (  # noqa: E402
+    Governor, MemoryStore, Pipeline, Trace, WebhookNotifier, make_backend,
+)
 from agentflow.agents import Researcher, Writer, FactChecker  # noqa: E402
 
 
@@ -45,7 +52,7 @@ def require_clean_publish(action: str, ctx) -> tuple[bool, str]:
     return True, "verified and clean"
 
 
-def build_pipeline(llm, trace_path: str | None, strict: bool, stop_on_failure: bool) -> Pipeline:
+def build_pipeline(llm, trace_path: str | None, strict: bool, stop_on_failure: bool, webhook: WebhookNotifier | None = None) -> Pipeline:
     governor = Governor(
         policies=[("clean_publish", require_clean_publish)],
         max_agent_calls=10,
@@ -61,6 +68,7 @@ def build_pipeline(llm, trace_path: str | None, strict: bool, stop_on_failure: b
         trace=trace,
         strict=strict,
         stop_on_failure=stop_on_failure,
+        webhook=webhook,
     )
 
 
@@ -82,7 +90,15 @@ def main() -> int:
                     help="Cap on completion tokens for OpenAI-compatible backends.")
     ap.add_argument("--retries", type=int, default=2,
                     help="Extra attempts after a failed LLM call (default: 2).")
+    ap.add_argument("--memory", default=None,
+                    help="Path to a JSON MemoryStore: recall a prior run for the topic, then remember this one (default: none).")
+    ap.add_argument("--webhook", default=None,
+                    help="URL to POST a compact run summary to on pipeline_end (default: none).")
     args = ap.parse_args()
+
+    webhook = WebhookNotifier(args.webhook) if args.webhook else None
+    memory = MemoryStore(args.memory) if args.memory else None
+    prior = memory.recall(args.topic, limit=1) if memory else []
 
     llm = make_backend(args.llm, temperature=args.temperature, max_tokens=args.max_tokens, retries=args.retries)
     trace_path = args.trace or os.path.join(os.getcwd(), "agentflow_trace.jsonl")
@@ -90,8 +106,17 @@ def main() -> int:
     if os.path.exists(trace_path):
         os.remove(trace_path)
 
-    pipeline = build_pipeline(llm, trace_path, strict=not args.lenient, stop_on_failure=args.stop_on_failure)
+    pipeline = build_pipeline(llm, trace_path, strict=not args.lenient, stop_on_failure=args.stop_on_failure, webhook=webhook)
     result = pipeline.run(args.topic)
+    if memory is not None:
+        memory.remember(
+            args.topic,
+            key=f"run:{args.topic}",
+            topic=args.topic,
+            publishable=bool(result["publishable"]),
+            decision=result["decision"]["reason"],
+            output=(result["output"] or "")[:500],
+        )
 
     if args.json:
         print(json.dumps(result, indent=2))
@@ -102,6 +127,12 @@ def main() -> int:
     print("=" * 62)
     print("\n--- FINAL OUTPUT ---\n")
     print(result["output"])
+    if prior:
+        print("\n--- MEMORY (recalled prior run) ---")
+        for rec in prior:
+            print(f"  topic      : {rec.get('topic')}")
+            print(f"  publishable: {rec.get('publishable')}")
+            print(f"  decision   : {rec.get('decision')}")
     print("\n--- GOVERNANCE ---")
     print(f"  publish: {'ALLOWED' if result['decision']['allow'] else 'BLOCKED'}")
     print(f"  reason : {result['decision']['reason']}")
@@ -113,6 +144,11 @@ def main() -> int:
     print(f"\n  publishable: {result['publishable']}")
     print(f"  audit     : {trace_path}")
     print(f"  trace     : {result['trace_summary']}")
+    if webhook is not None:
+        wh = result.get("webhook") or {}
+        print(f"  webhook : ok={wh.get('ok')} status={wh.get('status')} {wh.get('error') or ''}".rstrip())
+    if memory is not None:
+        print(f"  memory  : {args.memory} (now {memory.count()} record(s))")
     print("=" * 62)
     return 0 if result["publishable"] else 1
 

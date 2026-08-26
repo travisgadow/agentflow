@@ -11,6 +11,9 @@ from .governor import Governor, Decision
 from .verifier import Verifier, Verdict
 from .trace import Trace
 from .pipeline import Pipeline
+from .memory import MemoryStore
+from .fanout import FanOut
+from .webhook import WebhookNotifier
 
 __all__ = [
     "Context",
@@ -27,4 +30,7 @@ __all__ = [
     "Verdict",
     "Trace",
     "Pipeline",
+    "MemoryStore",
+    "FanOut",
+    "WebhookNotifier",
 ]
