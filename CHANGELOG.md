@@ -19,6 +19,10 @@ preserved (system fonts, no CDN). JSON API unchanged.
 - Trace timeline shows relative offsets (`+0.03s`) instead of raw
   unix seconds; governor/pipeline-end events colored by decision
   (publish = cyan, veto/blocked = red).
+- `agentflow/__main__.py` used a backslash inside an f-string
+  expression — a SyntaxError on Python 3.10/3.11 (CI red since v0.4.0).
+  Hoisted the colored status string out of the f-string; CI green again
+  on all of 3.10–3.13.
 - `tests/test_webui.py` wording assertion relaxed to case-insensitive.
 
 ### Housekeeping

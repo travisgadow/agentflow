@@ -72,7 +72,8 @@ def main() -> None:
             sys.exit(1)
 
         print(f"\n\033[1mTask:\033[0m    {args.task}")
-        print(f"\033[1mStatus:\033[0m  {'\033[32mPublishable\033[0m' if result['publishable'] else '\033[31mBlocked\033[0m'}")
+        status = "\033[32mPublishable\033[0m" if result["publishable"] else "\033[31mBlocked\033[0m"
+        print(f"\033[1mStatus:\033[0m  {status}")
         if result.get("warnings"):
             print(f"\033[1mWarnings:\033[0m")
             for w in result["warnings"]:
