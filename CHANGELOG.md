@@ -2,6 +2,48 @@
 
 All notable changes to `agentflow` are documented here.
 
+## [0.4.0] — 2026-08-31
+
+**Interactive web UI** — a zero-dependency, stdlib-only single-page application
+for running agentflow pipelines, inspecting results, and managing memory
+from the browser.
+
+### New
+
+- **`WebUIServer`** (`agentflow/webui.py`) — a `ThreadingHTTPServer` that
+  serves an embedded single-page app with a modern dark theme. No external
+  CSS/JS/frameworks — everything is inline in one HTML string.
+  - **Run Pipeline** — enter a task, pick LLM backend (mock or any
+    OpenAI-compatible endpoint), set temperature / max-tokens / retries,
+    toggle strict/lenient and stop-on-failure. The full result is rendered:
+    publishable badge, stage-by-stage verification, output report, warnings,
+    governor decision, budget, and a scrollable trace timeline.
+  - **Memory** — recall recent records (optionally filtered by query) and
+    clear the store, all from the browser.
+  - **About** — version, agents, core modules, and the architecture diagram.
+  - JSON API endpoints: `GET /api/health`, `GET /api/about`,
+    `POST /api/run`, `GET /api/memory/recent`, `POST /api/memory/clear`.
+- **`python -m agentflow serve`** — start the web UI from the CLI.
+  Options: `--port`, `--host`, `--memory`.
+- **`python -m agentflow run "topic"`** — run a pipeline from the CLI
+  with `--llm`, `--lenient`, `--stop-on-failure`, `--model`,
+  `--temperature`, `--max-tokens`.
+- **`agentflow` console script** (via `[project.scripts]` in pyproject.toml)
+  maps to the same CLI, so `pip install . && agentflow serve` works.
+- **`WebUIServer`** added to the public API (`from agentflow import WebUIServer`).
+
+### Packaging
+
+- Version bumped to **0.4.0**.
+- `pyproject.toml` gains the `[project.scripts]` entry point.
+- `agentflow/__init__.py` exports `WebUIServer`.
+
+### Tests
+
+- **`tests/test_webui.py`** — 7 new tests: health endpoint, about endpoint,
+  mock pipeline run (publishable + 3 stages + budget), lenient run,
+  missing-task validation (400), empty memory listing, and HTML page serving.
+
 ## [0.3.0] — 2026-08-25
 
 Three new capabilities, all stdlib-only and offline-testable, drawn from the
