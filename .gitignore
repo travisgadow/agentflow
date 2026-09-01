@@ -10,5 +10,6 @@ venv/
 .pytest_cache/
 agentflow_trace.jsonl
 agentflow_memory.json
+server.log
 *.json.tmp
 .DS_Store

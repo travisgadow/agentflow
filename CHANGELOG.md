@@ -2,6 +2,29 @@
 
 All notable changes to `agentflow` are documented here.
 
+## [0.4.1] — 2026-08-31
+
+**Web UI revamp** — full visual redesign of the embedded single-page app
+(glass/aurora dark theme, left-rail nav, animated
+Researcher → Writer → FactChecker → Governor pipeline visualization with
+per-stage verified/failed states, verdict banner, budget stat cards, safe
+mini-markdown output rendering, semantic trace timeline, toasts,
+⌘/Ctrl+Enter to run, responsive + reduced-motion support). Zero dependencies
+preserved (system fonts, no CDN). JSON API unchanged.
+
+### Fixed
+
+- Stage checks now render the real `check` name and `detail`
+  (the old UI read a nonexistent `name` field and showed `undefined`).
+- Trace timeline shows relative offsets (`+0.03s`) instead of raw
+  unix seconds; governor/pipeline-end events colored by decision
+  (publish = cyan, veto/blocked = red).
+- `tests/test_webui.py` wording assertion relaxed to case-insensitive.
+
+### Housekeeping
+
+- `server.log` added to `.gitignore`.
+
 ## [0.4.0] — 2026-08-31
 
 **Interactive web UI** — a zero-dependency, stdlib-only single-page application

@@ -123,6 +123,6 @@ def test_html_served():
             html = resp.read().decode()
         assert "<!DOCTYPE html>" in html
         assert "agentflow" in html
-        assert "Run Pipeline" in html
+        assert "run pipeline" in html.lower()  # nav + primary action present
     finally:
         _stop(server)

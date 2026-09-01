@@ -12,7 +12,7 @@ dominating agentic AI in mid-2026:
 
 Zero runtime dependencies (Python stdlib only). Swap the LLM backend via env.
 """
-__version__ = "0.4.0"
+__version__ = "0.4.1"
 
 from .core import (  # noqa: F401
     Agent, AgentResult, Context, Governor, Decision, LLMBackend, LLMError,
